@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
 
 #define ID_TRAY_ICON 1001
 #define ID_MENU_EXIT 2001
@@ -29,6 +31,7 @@ DWORD g_lastMoveTime = 0;
 bool g_showPopup = false;
 bool g_popupMoved = false;
 NOTIFYICONDATAA g_nid = {0};
+ULONG_PTR g_gdiplusToken = 0;
 
 void LoadConfig() {
     FILE* f = fopen("config.ini", "r");
@@ -171,9 +174,11 @@ void CreatePopupWindow() {
     
     RegisterClassExA(&wc);
     
-    g_hPopup = CreateWindowExA(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+    g_hPopup = CreateWindowExA(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
         "PopupWindow", "", WS_POPUP, 0, 0, BUTTON_WIDTH * 2 + 10, BUTTON_HEIGHT,
         NULL, NULL, GetModuleHandle(NULL), NULL);
+    
+    SetLayeredWindowAttributes(g_hPopup, 0, 200, LWA_ALPHA);
 }
 
 void ShowPopupAtCursor() {
@@ -296,13 +301,47 @@ void ShowSettingsDialog() {
     UpdateWindow(hSettings);
 }
 
+HICON LoadPngIcon(const char* filename) {
+    GpBitmap* bitmap = NULL;
+    GpStatus status;
+    HICON hIcon = NULL;
+    char fullPath[MAX_PATH];
+    WCHAR wFilename[MAX_PATH];
+    
+    GetModuleFileNameA(NULL, fullPath, MAX_PATH);
+    char* lastSlash = strrchr(fullPath, '\\');
+    if (lastSlash) {
+        *(lastSlash + 1) = '\0';
+        strcat_s(fullPath, MAX_PATH, filename);
+    } else {
+        strcpy_s(fullPath, MAX_PATH, filename);
+    }
+    
+    MultiByteToWideChar(CP_ACP, 0, fullPath, -1, wFilename, MAX_PATH);
+    
+    status = GdipCreateBitmapFromFile(wFilename, &bitmap);
+    if (status != Ok || !bitmap) {
+        return NULL;
+    }
+    
+    status = GdipCreateHICONFromBitmap(bitmap, &hIcon);
+    if (status != Ok) {
+        hIcon = NULL;
+    }
+    
+    GdipDisposeImage((GpImage*)bitmap);
+    return hIcon;
+}
+
 void AddTrayIcon() {
+    HICON hIcon = LoadPngIcon("icons8.png");
+    
     g_nid.cbSize = sizeof(NOTIFYICONDATAA);
     g_nid.hWnd = g_hwnd;
     g_nid.uID = ID_TRAY_ICON;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_USER + 1;
-    g_nid.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    g_nid.hIcon = hIcon ? hIcon : LoadIcon(NULL, IDI_APPLICATION);
     strcpy_s(g_nid.szTip, sizeof(g_nid.szTip), "Mouse Enhancer");
     
     Shell_NotifyIconA(NIM_ADD, &g_nid);
@@ -373,6 +412,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
         case WM_CLOSE:
             RemoveTrayIcon();
             if (g_mouseHook) UnhookWindowsHookEx(g_mouseHook);
+            if (g_gdiplusToken) GdiplusShutdown(g_gdiplusToken);
             PostQuitMessage(0);
             break;
             
@@ -384,6 +424,9 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    GdiplusStartupInput gdiplusStartupInput;
+    GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, NULL);
+    
     LoadConfig();
     CreatePopupWindow();
     
