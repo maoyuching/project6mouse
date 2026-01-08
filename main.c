@@ -16,9 +16,11 @@
 typedef struct {
     int leftKey;
     int rightKey;
+    float idleTimeout;
+    float hideTimeout;
 } Config;
 
-Config g_config = {VK_RETURN, VK_ESCAPE};
+Config g_config = {VK_RETURN, VK_ESCAPE, 1.5f, 1.5f};
 HHOOK g_mouseHook = NULL;
 HWND g_hwnd = NULL;
 HWND g_hPopup = NULL;
@@ -33,6 +35,8 @@ void LoadConfig() {
     if (f) {
         fscanf(f, "leftKey=%d\n", &g_config.leftKey);
         fscanf(f, "rightKey=%d\n", &g_config.rightKey);
+        fscanf(f, "idleTimeout=%f\n", &g_config.idleTimeout);
+        fscanf(f, "hideTimeout=%f\n", &g_config.hideTimeout);
         fclose(f);
     }
 }
@@ -42,6 +46,8 @@ void SaveConfig() {
     if (f) {
         fprintf(f, "leftKey=%d\n", g_config.leftKey);
         fprintf(f, "rightKey=%d\n", g_config.rightKey);
+        fprintf(f, "idleTimeout=%.1f\n", g_config.idleTimeout);
+        fprintf(f, "hideTimeout=%.1f\n", g_config.hideTimeout);
         fclose(f);
     }
 }
@@ -185,7 +191,7 @@ void ShowPopupAtCursor() {
 }
 
 LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    static HWND hLeftCombo, hRightCombo;
+    static HWND hLeftCombo, hRightCombo, hIdleEdit, hHideEdit;
     
     switch (msg) {
         case WM_CREATE: {
@@ -193,11 +199,19 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 10, 10, 100, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
             CreateWindowA("STATIC", "Right Button:", WS_VISIBLE | WS_CHILD,
                 10, 40, 100, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            CreateWindowA("STATIC", "Idle Timeout (s):", WS_VISIBLE | WS_CHILD,
+                10, 70, 100, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            CreateWindowA("STATIC", "Hide Timeout (s):", WS_VISIBLE | WS_CHILD,
+                10, 100, 100, 20, hwnd, NULL, GetModuleHandle(NULL), NULL);
             
             hLeftCombo = CreateWindowA("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VISIBLE | WS_CHILD | WS_VSCROLL,
                 120, 10, 150, 200, hwnd, (HMENU)3001, GetModuleHandle(NULL), NULL);
             hRightCombo = CreateWindowA("COMBOBOX", "", CBS_DROPDOWNLIST | WS_VISIBLE | WS_CHILD | WS_VSCROLL,
                 120, 40, 150, 200, hwnd, (HMENU)3002, GetModuleHandle(NULL), NULL);
+            hIdleEdit = CreateWindowA("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_NUMBER,
+                120, 70, 150, 20, hwnd, (HMENU)3003, GetModuleHandle(NULL), NULL);
+            hHideEdit = CreateWindowA("EDIT", "", WS_VISIBLE | WS_CHILD | WS_BORDER | ES_NUMBER,
+                120, 100, 150, 20, hwnd, (HMENU)3004, GetModuleHandle(NULL), NULL);
             
             const char* keys[] = {"Enter", "Escape", "Space", "Tab", "Backspace", "Delete", "Insert", "Home", "End", "Page Up", "Page Down"};
             int keyCodes[] = {VK_RETURN, VK_ESCAPE, VK_SPACE, VK_TAB, VK_BACK, VK_DELETE, VK_INSERT, VK_HOME, VK_END, VK_PRIOR, VK_NEXT};
@@ -208,9 +222,9 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             }
             
             CreateWindowA("BUTTON", "OK", WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
-                50, 80, 80, 30, hwnd, (HMENU)IDOK, GetModuleHandle(NULL), NULL);
+                50, 140, 80, 30, hwnd, (HMENU)IDOK, GetModuleHandle(NULL), NULL);
             CreateWindowA("BUTTON", "Cancel", WS_VISIBLE | WS_CHILD,
-                150, 80, 80, 30, hwnd, (HMENU)IDCANCEL, GetModuleHandle(NULL), NULL);
+                150, 140, 80, 30, hwnd, (HMENU)IDCANCEL, GetModuleHandle(NULL), NULL);
             
             break;
         }
@@ -219,6 +233,12 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             int leftIndex = 0, rightIndex = 1;
             SendMessageA(hLeftCombo, CB_SETCURSEL, leftIndex, 0);
             SendMessageA(hRightCombo, CB_SETCURSEL, rightIndex, 0);
+            
+            char idleText[32], hideText[32];
+            sprintf_s(idleText, sizeof(idleText), "%.1f", g_config.idleTimeout);
+            sprintf_s(hideText, sizeof(hideText), "%.1f", g_config.hideTimeout);
+            SetWindowTextA(hIdleEdit, idleText);
+            SetWindowTextA(hHideEdit, hideText);
             break;
         }
         
@@ -231,6 +251,15 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
                 g_config.leftKey = keyCodes[leftIndex];
                 g_config.rightKey = keyCodes[rightIndex];
                 
+                char idleText[32], hideText[32];
+                GetWindowTextA(hIdleEdit, idleText, 32);
+                GetWindowTextA(hHideEdit, hideText, 32);
+                g_config.idleTimeout = (float)atof(idleText);
+                g_config.hideTimeout = (float)atof(hideText);
+                
+                if (g_config.idleTimeout < 0.1f) g_config.idleTimeout = 0.1f;
+                if (g_config.hideTimeout < 0.1f) g_config.hideTimeout = 0.1f;
+                
                 SaveConfig();
                 DestroyWindow(hwnd);
             } else if (LOWORD(wParam) == IDCANCEL) {
@@ -240,7 +269,6 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         }
         
         case WM_DESTROY:
-            PostQuitMessage(0);
             break;
             
         default:
@@ -261,7 +289,7 @@ void ShowSettingsDialog() {
     RegisterClassExA(&wc);
     
     HWND hSettings = CreateWindowExA(0, "SettingsWindow", "Settings",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 280, 150,
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 280, 200,
         NULL, NULL, GetModuleHandle(NULL), NULL);
     
     ShowWindow(hSettings, SW_SHOW);
@@ -309,11 +337,13 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) 
             if (wParam == TIMER_IDLE) {
                 DWORD currentTime = GetTickCount();
                 DWORD timeSinceLastMove = currentTime - g_lastMoveTime;
+                DWORD idleTimeoutMs = (DWORD)(g_config.idleTimeout * 1000);
+                DWORD hideTimeoutMs = (DWORD)(g_config.hideTimeout * 1000);
                 
-                if (!g_showPopup && timeSinceLastMove >= IDLE_TIMEOUT) {
+                if (!g_showPopup && timeSinceLastMove >= idleTimeoutMs) {
                     ShowPopupAtCursor();
                     g_popupMoved = false;
-                } else if (g_showPopup && g_popupMoved && timeSinceLastMove >= HIDE_TIMEOUT) {
+                } else if (g_showPopup && g_popupMoved && timeSinceLastMove >= hideTimeoutMs) {
                     ShowWindow(g_hPopup, SW_HIDE);
                     g_showPopup = false;
                     g_popupMoved = false;
