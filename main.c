@@ -378,10 +378,6 @@ LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             CreateWindowA("BUTTON", "Cancel", WS_VISIBLE | WS_CHILD,
                 150, 240, 80, 30, hwnd, (HMENU)IDCANCEL, GetModuleHandle(NULL), NULL);
             
-            break;
-        }
-        
-        case WM_INITDIALOG: {
             const char* leftKeyName = GetKeyNameFromVkCode(g_config.leftKey);
             const char* rightKeyName = GetKeyNameFromVkCode(g_config.rightKey);
             SetWindowTextA(hLeftCombo, leftKeyName);
